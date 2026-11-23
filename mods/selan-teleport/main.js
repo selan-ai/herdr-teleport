@@ -1,5 +1,5 @@
 // Moves a space from this computer to another machine: its Claude Code session and the repository
-// it works in go by `selan teleport --json` (selan 1.35 or later), then the space opens there,
+// it works in go by `selan teleport --pid <its process> --json` (selan 1.36 or later), then the space opens there,
 // resuming the session, and closes here.
 // Opened as a dialog with props { space, machine }, as a sidebar does when a space is dropped on a
 // machine; opened bare (mod.open, a key), it moves the active space and asks where to when more than
@@ -11,10 +11,10 @@ import { agents, panes, spaces, hc, exec, run, props, closeOverlay, theme, check
 
 // A long session's transcript is tens of megabytes, and it may cross a tunnel: the most exec waits.
 const TIMEOUT_MS = 600_000;
-const OLD = "This selan cannot move a session for Herdr: it needs selan 1.35 or later. Run selan update.";
+const OLD = "This selan cannot move a session for Herdr: it needs selan 1.36 or later. Run selan update.";
 
-/** What a drop asks: the one Claude Code agent of a space on this computer, and the folder it is in;
- *  or why that space cannot go to that machine. */
+/** What a drop asks: the one Claude Code agent of a space on this computer, its process and the folder
+ *  it runs in; or why that space cannot go to that machine. */
 class Plan {
   /** The machines a space can go to: another one, connected, reached over ssh. */
   static targets(machines) {
@@ -29,29 +29,34 @@ class Plan {
     if (!machine) return { why: `${name} is not one of your machines.` };
     if (machine.via) return { why: `${name} is reached by a command, and teleport needs ssh.` };
     if (machine.state !== "connected") return { why: `${name} is not connected.` };
-    const local = (a) => !spaces().find((s) => s.id === a.space)?.machine;
-    const claude = agents().filter((a) => a.program?.key === "claude" && local(a));
-    const here = claude.filter((a) => a.space === spaceId);
+    const here = agents().filter((a) => a.space === spaceId && a.program?.key === "claude");
     if (here.length === 0) return { why: "There is no Claude Code agent in this space to move." };
     if (here.length > 1) return { why: `This space has ${here.length} Claude Code agents, and teleport moves a space with one.` };
     const [agent] = here;
     if (agent.status === "working") return { why: "Claude Code is working. Move it once it is done." };
-    const cwd = (a) => panes().find((p) => p.terminal === a.address)?.cwd ?? null;
-    const folder = cwd(agent);
-    if (!folder) return { why: "Herdr cannot tell which folder the agent is in." };
-    // A session is found by its folder: two agents in one would leave it unclear which is this one's.
-    const other = claude.find((a) => a.address !== agent.address && cwd(a) === folder);
-    if (other) return { why: `Another Claude Code agent works in the same folder, in ${other.space_name}, so it is not clear which session is this one's.` };
-    return { space, target: machine.target, folder };
+    return { space, target: machine.target, agent: agent.address };
+  }
+
+  /** The agent's process, which names its session to selan, and the folder it runs in, which is
+   *  where Claude Code keeps that session; or why Herdr cannot tell. */
+  static async process(plan) {
+    let fg;
+    try {
+      const r = await hc(["get", plan.agent, "--json"]);
+      if (r.code === 0) fg = JSON.parse(r.stdout).foreground;
+    } catch {}
+    const folder = fg?.cwd ?? panes().find((p) => p.terminal === plan.agent)?.cwd;
+    if (!fg?.pid || !folder) return { why: "Herdr cannot tell which Claude Code process the agent is." };
+    return { ...plan, pid: fg.pid, folder };
   }
 }
 
 /** The Selan CLI, run as the person: the session moved, or why not. Never a throw. */
 class Selan {
-  static async teleport(target, folder) {
+  static async teleport(plan) {
     let r;
     try {
-      r = await exec("selan", ["teleport", target, "--json"], { cwd: folder, timeout: TIMEOUT_MS });
+      r = await exec("selan", ["teleport", plan.target, "--pid", String(plan.pid), "--json"], { cwd: plan.folder, timeout: TIMEOUT_MS });
     } catch (err) {
       return { error: `selan did not run (${String(err?.message ?? err)}). Is the Selan CLI installed and on PATH?` };
     }
@@ -82,17 +87,26 @@ export default class Teleport extends View {
       this.machines = machines;
       this.space = p.space ?? spaces().find((s) => s.active)?.id;
       const targets = Plan.targets(machines);
-      if (p.machine) this.choose(p.machine);
-      else if (targets.length === 1) this.choose(targets[0].name);
+      if (p.machine) this.choose(p.machine, cx);
+      else if (targets.length === 1) this.choose(targets[0].name, cx);
       else if (targets.length === 0) this.state = { kind: "refused", why: "No other machine is connected over ssh. Add one in Settings, under Machines." };
       else this.state = { kind: "choosing", targets };
       cx.notify();
     });
   }
 
-  choose(machine) {
+  choose(machine, cx) {
     const plan = Plan.of(this.space, machine, this.machines);
-    this.state = plan.why ? { kind: "refused", why: plan.why } : { kind: "ready", plan, machine };
+    if (plan.why) {
+      this.state = { kind: "refused", why: plan.why };
+      return;
+    }
+    this.state = { kind: "loading" };
+    cx.spawn(async (cx) => {
+      const found = await Plan.process(plan);
+      this.state = found.why ? { kind: "refused", why: found.why } : { kind: "ready", plan: found, machine };
+      cx.notify();
+    });
   }
 
   move(cx) {
@@ -101,7 +115,7 @@ export default class Teleport extends View {
     this.state = { kind: "moving", plan, machine: this.state.machine };
     cx.notify();
     cx.spawn(async (cx) => {
-      const out = await Selan.teleport(plan.target, plan.folder);
+      const out = await Selan.teleport(plan);
       if (out.error) {
         this.state = { kind: "refused", why: out.error };
         cx.notify();
@@ -122,7 +136,7 @@ export default class Teleport extends View {
     // The names line up with the title; a row's hover reaches past them.
     const rows = (targets) => v_flex().mx(-10).children(targets.map((m, i) => h_flex().id(`to-${m.name}`).h(34).px(10).items_center().rounded(7)
       .text_color(t.foreground).cursor_pointer().hover((st) => st.bg(t.hover))
-      .on_click((_e, cx) => { this.choose(m.name); cx.notify(); }).child(m.name)));
+      .on_click((_e, cx) => { this.choose(m.name, cx); cx.notify(); }).child(m.name)));
     const detail = {
       loading: "",
       choosing: s.targets && rows(s.targets),

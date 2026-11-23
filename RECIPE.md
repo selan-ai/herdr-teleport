@@ -1,7 +1,7 @@
 # Teleport
 
 A dialog that moves a space from this computer to another machine: its one Claude Code agent's
-session, and the repository the agent works in, go there by `selan teleport --json`, then the space
+session, and the repository the agent works in, go there by `selan teleport --pid --json`, then the space
 opens on that machine, resuming the session, and closes here.
 
 ![Move a space to another machine](preview.png)
@@ -40,18 +40,19 @@ opens on that machine, resuming the session, and closes here.
   - the machine is unknown, reached by a command, or not connected;
   - no other machine could take it;
   - the space has no Claude Code agent (`program.key` "claude"), or more than one;
-  - the agent is working;
-  - Herdr cannot tell the agent's folder (its pane's `cwd`);
-  - another Claude Code agent on this computer works in the same folder. `selan` finds the session
-    by folder, so it could not tell which is this one's.
-- **Move** (or Enter) runs `selan teleport <target> --json` in the agent's folder, waiting up to
-  10 minutes. Its answer is one JSON object: `folder` (where the session is on that machine) and
-  `resume` (the command that checks out the repository and resumes the session there), or `error`.
+  - the agent is working (Herdr's status, and `selan` refuses a session Claude Code lists as busy);
+  - Herdr cannot tell the agent's process: `hc get <agent> --json` has no `foreground.pid`.
+- **The session** is the one the agent's process has open: `selan` reads it from Claude Code's own
+  list of running sessions, so other agents in the same folder do not matter.
+- **Move** (or Enter) runs `selan teleport <target> --pid <foreground.pid> --json` in the agent's
+  folder (`foreground.cwd`, else its pane's `cwd`), waiting up to 10 minutes. Its answer is one JSON
+  object: `folder` (where the session is on that machine) and `resume` (the command that checks out
+  the repository and resumes the session there), or `error`.
 - **When it moved**: `space.new { machine, folder, argv: resume, focus: true }`, then
   `space.close { id, confirmed: true }`, then the dialog closes. Herdr runs `resume` in that machine's
   login shell, so its PATH has `selan`.
 - **When it did not**: the error in the dialog. An answer that is not JSON, or a usage error, means a
-  selan older than 1.35: "This selan cannot move a session for Herdr: it needs selan 1.35 or later.
+  selan older than 1.36: "This selan cannot move a session for Herdr: it needs selan 1.36 or later.
   Run selan update." A `selan` that does not start says so and asks whether it is on PATH.
 - **Keys**: Enter moves when ready and closes otherwise; Esc closes; neither does anything while
   moving.

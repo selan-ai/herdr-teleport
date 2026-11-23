@@ -9,7 +9,7 @@ conversation, and closes here.
 
 ## Install
 
-You need the Selan CLI 1.35 or later, signed in, here and on each machine you move spaces to, and
+You need the Selan CLI 1.36 or later, signed in, here and on each machine you move spaces to, and
 those machines added to Herdr over ssh:
 
 ```sh
@@ -36,11 +36,13 @@ directory for the same folder under its home, and the repository goes by `git pu
 its branch checked out there at the session's commit and the work not committed yet put back on
 top, still uncommitted. Ignored files such as `.env` stay here, and a copy there with changes of its
 own is refused. A space moves from this computer to a machine Herdr reaches over ssh, macOS or
-Linux, when it has one Claude Code agent that is not working.
+Linux, when it has one Claude Code agent and that agent is not working: a session at work is never
+moved.
 
 ## What it runs
 
-The mod runs `hc machine ls` and `selan teleport <machine> --json`, which holds your sign-in and
+The mod runs `hc machine ls`, `hc get` (for the agent's process) and
+`selan teleport <machine> --pid <process> --json`, which holds your sign-in and
 reaches the other machine with your ssh; the mod never sees a token and fetches nothing itself. Then
 it opens the space there and closes this one through Herdr. `RECIPE.md` describes the mod in full.
 
