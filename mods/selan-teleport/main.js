@@ -1,8 +1,8 @@
 // Moves a space from this computer to another machine: its Claude Code session and the repository
 // it works in go by `selan teleport --pid <its process> --json` (selan 1.36 or later), then the space opens there,
 // resuming the session, and closes here.
-// Opened as a dialog with props { space, machine }, as a sidebar does when a space is dropped on a
-// machine; opened bare (mod.open, a key), it moves the active space and asks where to when more than
+// Opened as a dialog with props { space, tab?, machine }, as a sidebar does when a space, or one chat
+// (tab) of it, is dropped on a machine; opened bare (mod.open, a key), it moves the active space and asks where to when more than
 // one machine could take it. Enter moves, Esc cancels.
 
 import { View, div, svg } from "gpui-kit";
@@ -21,7 +21,7 @@ class Plan {
     return machines.filter((m) => !m.temporary && !m.via && m.state === "connected");
   }
 
-  static of(spaceId, name, machines) {
+  static of(spaceId, name, machines, tab) {
     const space = spaces().find((s) => s.id === spaceId);
     if (!space) return { why: "That space is gone." };
     if (space.machine) return { why: "Teleport moves a space from this computer." };
@@ -29,12 +29,15 @@ class Plan {
     if (!machine) return { why: `${name} is not one of your machines.` };
     if (machine.via) return { why: `${name} is reached by a command, and teleport needs ssh.` };
     if (machine.state !== "connected") return { why: `${name} is not connected.` };
-    const here = agents().filter((a) => a.space === spaceId && a.program?.key === "claude");
-    if (here.length === 0) return { why: "There is no Claude Code agent in this space to move." };
-    if (here.length > 1) return { why: `This space has ${here.length} Claude Code agents, and teleport moves a space with one.` };
+    const what = tab ? "chat" : "space";
+    const here = agents().filter((a) => a.space === spaceId && (!tab || a.tab === tab) && a.program?.key === "claude");
+    if (here.length === 0) return { why: `There is no Claude Code agent in this ${what} to move.` };
+    if (here.length > 1) return { why: `This ${what} has ${here.length} Claude Code agents, and teleport moves one.` };
     const [agent] = here;
     if (agent.status === "working") return { why: "Claude Code is working. Move it once it is done." };
-    return { space, target: machine.target, agent: agent.address };
+    // A chat of a space with other tabs closes alone; the last one closes its space.
+    const alone = !tab || (space.tabs ?? []).length <= 1;
+    return { space, target: machine.target, agent: agent.address, close: alone ? { name: "space.close", args: { id: space.id, confirmed: true } } : { name: "tab.close", args: { id: tab, confirmed: true } } };
   }
 
   /** The agent's process, which names its session to selan, and the folder it runs in, which is
@@ -96,7 +99,7 @@ export default class Teleport extends View {
   }
 
   choose(machine, cx) {
-    const plan = Plan.of(this.space, machine, this.machines);
+    const plan = Plan.of(this.space, machine, this.machines, props()?.tab);
     if (plan.why) {
       this.state = { kind: "refused", why: plan.why };
       return;
@@ -122,7 +125,7 @@ export default class Teleport extends View {
         return;
       }
       run("space.new", { machine: this.state.machine, folder: out.folder, argv: out.resume, focus: true });
-      run("space.close", { id: plan.space.id, confirmed: true });
+      run(plan.close.name, plan.close.args);
       closeOverlay(props()?.overlay);
     });
   }
@@ -140,7 +143,7 @@ export default class Teleport extends View {
     const detail = {
       loading: "",
       choosing: s.targets && rows(s.targets),
-      ready: `The Claude Code session goes with its repository: the branch and the work not committed yet. Ignored files such as .env stay here. The space opens on ${s.machine} and closes here.`,
+      ready: `The Claude Code session goes with its repository: the branch and the work not committed yet. Ignored files such as .env stay here. It opens on ${s.machine} and closes here.`,
       moving: `Moving to ${s.machine}…`,
       refused: s.why,
     }[s.kind];
@@ -174,7 +177,7 @@ export default class Teleport extends View {
       .when(s.kind !== "moving" && s.kind !== "loading", (el) => el.child(h_flex().justify_end().gap(8).text_size(12)
         .when(s.kind === "ready", (row) => row
           .child(button("cancel", "Cancel", t.raised, t.foreground, close))
-          .child(button("move", "Move", t.solid, t.solid_foreground, () => this.move(cx))))
+          .child(button("move", "Move", t.solid, t.solid_foreground, (_e, cx) => this.move(cx))))
         .when(s.kind === "refused" || s.kind === "choosing", (row) => row.child(button("close", s.kind === "choosing" ? "Cancel" : "Close", t.raised, t.foreground, close)))));
   }
 }

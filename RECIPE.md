@@ -28,9 +28,10 @@ opens on that machine, resuming the session, and closes here.
 
 ## How it behaves
 
-- **Opened with props `{ space, machine }`**, as a sidebar does when a space is dropped on a machine:
-  it asks about moving that space there. **Opened bare** (`mod.open:selan-teleport`, ⌘⇧M in
-  `keys.json`): it moves the active space, to the one machine that could take it, or asks which.
+- **Opened with props `{ space, tab?, machine }`**, as a sidebar does when a space, or one chat (tab)
+  of it, is dropped on a machine: it asks about moving that chat's or that space's agent there.
+  **Opened bare** (`mod.open:selan-teleport`): it moves the active space, to the one machine that
+  could take it, or asks which.
 - **The machines** come from `hc machine ls --json`. One can take a space when it is connected,
   reached over ssh (not `via` a command) and not temporary; its `target` is the ssh name `selan`
   is given.
@@ -39,7 +40,7 @@ opens on that machine, resuming the session, and closes here.
   - the space is not on this computer;
   - the machine is unknown, reached by a command, or not connected;
   - no other machine could take it;
-  - the space has no Claude Code agent (`program.key` "claude"), or more than one;
+  - the chat (or the space) has no Claude Code agent (`program.key` "claude"), or more than one;
   - the agent is working (Herdr's status, and `selan` refuses a session Claude Code lists as busy);
   - Herdr cannot tell the agent's process: `hc get <agent> --json` has no `foreground.pid`.
 - **The session** is the one the agent's process has open: `selan` reads it from Claude Code's own
@@ -49,6 +50,7 @@ opens on that machine, resuming the session, and closes here.
   object: `folder` (where the session is on that machine) and `resume` (the command that checks out
   the repository and resumes the session there), or `error`.
 - **When it moved**: `space.new { machine, folder, argv: resume, focus: true }`, then
+  `tab.close { id, confirmed: true }` for a chat of a space with other tabs, else
   `space.close { id, confirmed: true }`, then the dialog closes. Herdr runs `resume` in that machine's
   login shell, so its PATH has `selan`.
 - **When it did not**: the error in the dialog. An answer that is not JSON, or a usage error, means a
@@ -59,8 +61,8 @@ opens on that machine, resuming the session, and closes here.
 
 ## What a sidebar does
 
-A sidebar opens the dialog when a space from this computer, pressed and dragged, is let go on a
-machine's header: `openOverlay({ mod: "selan-teleport", kind: "dialog", width: 440, height: 190,
-props: { space, machine } })`. It offers the drop only when `mods/selan-teleport/main.js` is in Herdr's
+A sidebar opens the dialog when a space from this computer, or one chat of it, pressed and dragged,
+is let go on another machine: `openOverlay({ mod: "selan-teleport", kind: "dialog", width: 440,
+height: 190, props: { space, tab?, machine } })`. It offers the drop only when `mods/selan-teleport/main.js` is in Herdr's
 home, and only on a machine that is connected and reached over ssh; while a space is held over such a
 header, the header is filled with `selected` and its text is `foreground`.
